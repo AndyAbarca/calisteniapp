@@ -30,7 +30,8 @@ calisthenics coach).
 - The code and containers live **entirely on the Linux Mint machine**, not on Windows.
   VS Code's integrated terminal, being in Remote-SSH mode, executes commands on Mint.
 - Project path on the Mint filesystem: `/home/andy_dell/DevOps/calisteniapp`
-- Version control: Git + GitHub (repo visibility TBD — see section 8)
+- Version control: Git + GitHub
+  - Remote repo: https://github.com/AndyAbarca/calisteniapp (public)
 
 ## 4. Domain model (DRAFT — subject to revision)
 
@@ -116,13 +117,15 @@ calisthenics coach).
 - Git 2.43.0 installed and configured (`user.name`, `user.email`) on the Mint machine.
 - Claude Code 2.1.201 installed and authenticated with a Claude Pro account.
 - Local Git repository initialized at `/home/andy_dell/DevOps/calisteniapp`
-  (default branch: `master`, no commits yet).
-- Remote GitHub repository: **pending creation** (see section 8).
+  (default branch: `main`).
+- Remote GitHub repository: created and connected.
+  `origin` -> `git@github.com:AndyAbarca/calisteniapp.git` (public), branch `main`
+  tracked via `git push -u origin main`.
 
 ## 8. Explicit pending items (nothing left implicitly "done")
 
-- [ ] Decide public vs. private for the GitHub repo.
-- [ ] Create the remote repo and connect it (`git remote add origin ...`).
+- [x] Decide public vs. private for the GitHub repo. -> Public
+- [x] Create the remote repo and connect it (`git remote add origin ...`).
 - [ ] Review and update the `exercise` model with the ebook material.
 - [ ] Define the final folder structure for the scaffold (backend/frontend/infra).
 - [ ] Decide user authentication strategy (even if single-user initially).
