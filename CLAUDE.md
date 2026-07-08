@@ -121,11 +121,19 @@ calisthenics coach).
 - Remote GitHub repository: created and connected.
   `origin` -> `git@github.com:AndyAbarca/calisteniapp.git` (public), branch `main`
   tracked via `git push -u origin main`.
+- Infra scaffold created, verified, and committed: FastAPI backend
+  (`backend/app/main.py` with `GET /health`), SQLAlchemy + CockroachDB connection
+  setup (env-based, no hardcoded credentials), minimal Vite+React frontend, and
+  `docker-compose.yml` wiring `cockroachdb` + `backend` + `frontend`, all bound to
+  `0.0.0.0` for LAN access. Verified via `docker compose up --build`. The `models/`,
+  `schemas/`, and `routes/` packages exist but are intentionally empty, pending the
+  domain model (see section 4).
 
 ## 8. Explicit pending items (nothing left implicitly "done")
 
 - [x] Decide public vs. private for the GitHub repo. -> Public
 - [x] Create the remote repo and connect it (`git remote add origin ...`).
+- [x] Scaffold the infra (backend/frontend/docker-compose) and commit it.
 - [ ] Review and update the `exercise` model with the ebook material.
 - [ ] Define the final folder structure for the scaffold (backend/frontend/infra).
 - [ ] Decide user authentication strategy (even if single-user initially).
