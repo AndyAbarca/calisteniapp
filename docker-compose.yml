@@ -11,12 +11,36 @@ services:
       - "0.0.0.0:8080:8080"
     volumes:
       - cockroach-data:/cockroach/cockroach-data
+    healthcheck:
+      # CockroachDB's single-node image doesn't accept a --database flag
+      # at startup like some DB images do, so the database is created via
+      # `cockroach sql` once the node is ready, right below in `db-init`.
+      test: ["CMD", "cockroach", "sql", "--insecure", "-e", "SELECT 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
     restart: unless-stopped
+
+  db-init:
+    image: cockroachdb/cockroach:v23.1.21
+    depends_on:
+      cockroachdb:
+        condition: service_healthy
+    # One-shot init container: creates the app database if it doesn't
+    # exist yet, then exits. Idempotent, so it's safe to run on every
+    # `docker compose up`. Kept separate from the `cockroachdb` service
+    # itself so the long-running DB process definition stays untouched.
+    entrypoint:
+      - sh
+      - -c
+      - "cockroach sql --insecure --host=cockroachdb -e \"CREATE DATABASE IF NOT EXISTS crdb_calisteniaapp_db;\""
+    restart: "no"
 
   backend:
     build: ./backend
     depends_on:
-      - cockroachdb
+      db-init:
+        condition: service_completed_successfully
     ports:
       - "0.0.0.0:8000:8000"
     volumes:
@@ -28,7 +52,7 @@ services:
       COCKROACH_PORT: "26257"
       COCKROACH_USER: root
       COCKROACH_PASSWORD: ""
-      COCKROACH_DATABASE: calisteniapp
+      COCKROACH_DATABASE: crdb_calisteniaapp_db
     restart: unless-stopped
 
   frontend:
