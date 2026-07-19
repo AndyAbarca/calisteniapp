@@ -151,6 +151,27 @@ calisthenics coach).
   database level too, not just in Python. Every UUID PK column therefore has
   `server_default=text("gen_random_uuid()")` in addition to the ORM-side
   `default=uuid.uuid4`.
+- **DB access is split into two identities, not one shared `root`**: `app_user`
+  is least-privilege (`SELECT`/`INSERT`/`UPDATE`/`DELETE` only, no DDL) and is
+  what the backend's runtime connection actually uses (`database_url` in
+  `app/config.py`); `root` is used only by Alembic (`alembic/env.py`) and
+  one-off scripts that need DDL (`admin_database_url`), e.g.
+  `seed_exercises.py`. Neither user has a password — CockroachDB's `--insecure`
+  mode doesn't just skip checking passwords, it refuses to let a user have one
+  at all. So this split buys **privilege isolation**, not authentication:
+  `app_user` structurally can't run DDL or touch other databases, but anything
+  that can reach the cluster can still connect as either user. Real
+  authentication would require enabling TLS certs, out of scope for local LAN
+  dev (see section 2, "Hosting").
+- **Two CockroachDB gotchas hit while building the split above, worth
+  remembering**:
+  - `CREATE USER ... WITH PASSWORD` fails outright under `--insecure` — not a
+    silent no-op, an actual error.
+  - Every user is implicitly a member of the built-in `public` role, which
+    grants `CREATE` on a database's public schema by default. Without an
+    explicit `REVOKE CREATE ON SCHEMA public FROM public`, a "least-privilege"
+    user can still create tables regardless of what it was or wasn't
+    explicitly granted.
 
 ## 7. Current environment state (as of this document's creation)
 
@@ -179,6 +200,14 @@ calisthenics coach).
 - `backend/scripts/seed_exercises.py` loaded 222 real `exercise` rows, derived from
   the "Overcoming Gravity" ebook index, into `crdb_calisteniaapp_db` via raw SQL
   (not the ORM) — see section 4.
+- `db-init` (in `docker-compose.yml`) now also creates the least-privilege
+  `app_user` and its grants on every `docker compose up` — `GRANT ... ON ALL
+  TABLES`, `ALTER DEFAULT PRIVILEGES FOR ROLE root` (so future tables Alembic
+  creates are automatically covered too), and `REVOKE CREATE ON SCHEMA public
+  FROM public` (see section 6's gotchas). Verified end-to-end from a genuinely
+  fresh volume (`docker compose down -v` → `up` → `alembic upgrade head` →
+  `seed_exercises.py`), including confirming `app_user` can `SELECT` but
+  cannot `CREATE TABLE`.
 
 ## 8. Explicit pending items (nothing left implicitly "done")
 
@@ -189,6 +218,10 @@ calisthenics coach).
   session, session_set) with their Alembic migrations.
 - [x] Review and update the `exercise` model with the ebook material (schema +
   initial data load — 222 rows landed).
+- [x] Split DB access into least-privilege `app_user` (runtime) and admin
+  `root` (migrations/scripts) — not originally tracked as a pending item, but
+  done; see sections 6 and 7 for the reasoning and the CockroachDB gotchas
+  hit along the way.
 - [ ] Fill in `progresses_from_id` for all 222 exercise rows based on the book's
   actual progression logic. Manual, user-driven — not to be automated by Claude Code.
 - [ ] Define the final folder structure for the scaffold (backend/frontend/infra).
