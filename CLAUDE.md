@@ -33,15 +33,14 @@ calisthenics coach).
 - Version control: Git + GitHub
   - Remote repo: https://github.com/AndyAbarca/calisteniapp (public)
 
-## 4. Domain model (IMPLEMENTED — schema migrated, `exercise` data still pending)
+## 4. Domain model (IMPLEMENTED — schema migrated, `exercise` seeded with real data)
 
 > **IMPORTANT:** the schema below is implemented in `backend/app/models/` and applied
-> to CockroachDB via Alembic migrations (see section 7). What's still open is the
-> `exercise` entity's *data*: the user has an ebook with calisthenics exercise tables
-> (categories, progressions, difficulty levels) that hasn't been loaded yet, so no real
-> exercise rows exist beyond whatever was used for testing. **Do not build complex
-> business logic that assumes a populated `exercise` table until real data is loaded.**
-> The columns themselves are final enough to build against.
+> to CockroachDB via Alembic migrations (see section 7). The `exercise` table is now
+> seeded with 222 real rows derived from the user's ebook, Steven Low's "Overcoming
+> Gravity" 2nd Edition (chapters 24-27), via `backend/scripts/seed_exercises.py`. The
+> one deliberately unfinished piece is `progresses_from_id` (see the exercise entity
+> below) — left NULL on all 222 rows on purpose, not a gap to fill automatically.
 
 ### Entities
 
@@ -49,16 +48,24 @@ calisthenics coach).
   `id (UUID, PK), name, date_of_birth, notes`
   Represents the person training. Multi-user from day 1 (see section 1).
 
-- **exercise** (ejercicio) — `backend/app/models/exercise.py` [SCHEMA DONE, DATA PENDING EBOOK LOAD]
-  `id (UUID, PK), name (unique), movement_pattern, progression_line, level, equipment,
-  progresses_from_id, book_page`
+- **exercise** (ejercicio) — `backend/app/models/exercise.py` [SCHEMA DONE, SEEDED WITH 222 REAL ROWS]
+  `id (UUID, PK), name (unique), movement_pattern, progression_line, level,
+  level_variant, equipment, progresses_from_id, book_page`
   `movement_pattern` is a free-text field for now (e.g. Push/Pull/Legs/Core/Static, no
   DB-level enum yet). `progression_line` + `level` together locate an exercise within a
-  named progression chain (e.g. "Pull-ups", "Front Lever"), with a unique constraint on
-  the pair. `progresses_from_id` self-references `exercise.id` to point at the prior
-  step in that chain (nullable — the first step of a line has no predecessor), e.g.
-  "knee push-ups → standard push-ups → one-arm push-ups". `book_page` links back to the
-  ebook page an exercise was sourced from, to ease loading and cross-checking that data.
+  named progression chain (e.g. "Pull-ups", "Front Lever"). `level` is nullable, since
+  the book itself marks some entries "N/A" (no single level applies). `level_variant`
+  (nullable, single char) exists because the book's own index genuinely assigns the
+  same level to two different exercises within one progression_line, twice (Planche
+  level 16; Muscle-ups and Inverted Muscle-ups level 8) — a real authorial collision,
+  not a derivation error to fudge away, so the unique constraint is
+  `(progression_line, level, level_variant)` rather than just the pair. `progresses_from_id`
+  self-references `exercise.id` to point at the prior step in that chain (nullable —
+  the first step of a line has no predecessor), e.g. "knee push-ups → standard
+  push-ups → one-arm push-ups" — **NULL on all 222 rows for now, deliberately**: the
+  user is reading the book himself to work out the real progression chains, and this
+  is explicitly not to be inferred or automated by Claude Code. `book_page` links back
+  to the ebook page an exercise was sourced from, to ease cross-checking that data.
 
 - **routine** (rutina) — `backend/app/models/routine.py`
   `id (UUID, PK), student_id, name, description, generation_method` (values: `manual` |
@@ -161,12 +168,17 @@ calisthenics coach).
   `0.0.0.0` for LAN access. Verified via `docker compose up --build`. The `models/`,
   `schemas/`, and `routes/` packages exist but are intentionally empty, pending the
   domain model (see section 4).
-- Alembic has 2 migrations applied against CockroachDB: the domain model baseline
-  (`7ebeb2df8200`, creates the 6 tables from section 4) and a follow-up fix adding
-  server-side UUID defaults (`b9f6688550b9`). `alembic/env.py` now has
+- Alembic has 3 migrations applied against CockroachDB: the domain model baseline
+  (`7ebeb2df8200`, creates the 6 tables from section 4), a follow-up fix adding
+  server-side UUID defaults (`b9f6688550b9`), and `df3166695497` (adds
+  `exercise.level_variant`, makes `exercise.level` nullable, and widens the unique
+  constraint to `(progression_line, level, level_variant)`). `alembic/env.py` now has
   `compare_server_default=True` enabled so autogenerate reliably detects
   `server_default` changes going forward — this wasn't the case initially, which
   caused a silently empty migration the first time a `server_default` was added.
+- `backend/scripts/seed_exercises.py` loaded 222 real `exercise` rows, derived from
+  the "Overcoming Gravity" ebook index, into `crdb_calisteniaapp_db` via raw SQL
+  (not the ORM) — see section 4.
 
 ## 8. Explicit pending items (nothing left implicitly "done")
 
@@ -175,7 +187,10 @@ calisthenics coach).
 - [x] Scaffold the infra (backend/frontend/docker-compose) and commit it.
 - [x] Implement the 6 domain models (student, exercise, routine, routine_exercise,
   session, session_set) with their Alembic migrations.
-- [ ] Review and update the `exercise` model with the ebook material.
+- [x] Review and update the `exercise` model with the ebook material (schema +
+  initial data load — 222 rows landed).
+- [ ] Fill in `progresses_from_id` for all 222 exercise rows based on the book's
+  actual progression logic. Manual, user-driven — not to be automated by Claude Code.
 - [ ] Define the final folder structure for the scaffold (backend/frontend/infra).
 - [ ] Decide user authentication strategy (even if single-user initially).
 - [ ] Set up the GitHub MCP server once the PM Agent phase is reached.
