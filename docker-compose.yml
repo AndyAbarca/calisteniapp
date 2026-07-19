@@ -26,14 +26,54 @@ services:
     depends_on:
       cockroachdb:
         condition: service_healthy
-    # One-shot init container: creates the app database if it doesn't
-    # exist yet, then exits. Idempotent, so it's safe to run on every
-    # `docker compose up`. Kept separate from the `cockroachdb` service
-    # itself so the long-running DB process definition stays untouched.
+    # One-shot init container: creates the app database, the low-privilege
+    # `app_user` the backend connects as, and its grants -- all idempotent,
+    # so it's safe to run on every `docker compose up`. Kept separate from
+    # the `cockroachdb` service itself so the long-running DB process
+    # definition stays untouched.
+    #
+    # `app_user` gets SELECT/INSERT/UPDATE/DELETE only, never DDL -- the
+    # backend's runtime connection (main.py/database.py/routes) should
+    # never be able to create/alter/drop tables, only read and write rows.
+    # Migrations keep running as root (see alembic/env.py), which is why
+    # this container connects with no --user flag (defaults to root in
+    # --insecure mode) to run CREATE USER / GRANT in the first place.
+    #
+    # ALTER DEFAULT PRIVILEGES is what makes this work for tables that
+    # don't exist yet at `docker compose up` time: without it, app_user
+    # would need this GRANT re-run by hand after every future migration
+    # that adds a table. "FOR ROLE root" matters because root is who
+    # actually creates tables (via Alembic), so it's root's default
+    # privileges that need to name app_user as a grantee.
+    #
+    # No WITH PASSWORD on CREATE USER: CockroachDB's --insecure mode
+    # doesn't just skip checking passwords, it actively refuses to let you
+    # set one at all ("setting or updating a password is not supported in
+    # insecure mode") -- confirmed by this step failing outright the first
+    # time it was tried with one. So app_user, like root, has no password;
+    # see the --insecure note in config.py: this whole split is about
+    # privilege isolation (app_user structurally can't DROP DATABASE or
+    # touch other databases), not about authentication.
+    #
+    # The REVOKE CREATE ON SCHEMA public FROM public step matters more
+    # than it looks: CockroachDB grants CREATE and USAGE on every
+    # database's public schema to the built-in `public` pseudo-role by
+    # default, and every user (app_user included) is implicitly a member
+    # of it. Without this revoke, app_user could CREATE TABLE despite
+    # never being granted DDL rights directly -- confirmed by testing:
+    # app_user could create a table before this revoke, and could not
+    # after. Safe for root, since root's DDL rights come from its own
+    # explicit grant plus `admin` role membership, not from `public`.
     entrypoint:
       - sh
       - -c
-      - "cockroach sql --insecure --host=cockroachdb -e \"CREATE DATABASE IF NOT EXISTS crdb_calisteniaapp_db;\""
+      - |
+        set -e
+        cockroach sql --insecure --host=cockroachdb -e "CREATE DATABASE IF NOT EXISTS crdb_calisteniaapp_db;"
+        cockroach sql --insecure --host=cockroachdb -e "CREATE USER IF NOT EXISTS app_user;"
+        cockroach sql --insecure --host=cockroachdb -d crdb_calisteniaapp_db -e "GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO app_user;"
+        cockroach sql --insecure --host=cockroachdb -d crdb_calisteniaapp_db -e "ALTER DEFAULT PRIVILEGES FOR ROLE root GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO app_user;"
+        cockroach sql --insecure --host=cockroachdb -d crdb_calisteniaapp_db -e "REVOKE CREATE ON SCHEMA public FROM public;"
     restart: "no"
 
   backend:
@@ -50,9 +90,17 @@ services:
     environment:
       COCKROACH_HOST: cockroachdb
       COCKROACH_PORT: "26257"
-      COCKROACH_USER: root
+      # Runtime identity: least-privilege, no DDL rights (see db-init above).
+      # No password, same as root -- CockroachDB's --insecure mode won't
+      # let a user have one at all (see db-init's CREATE USER comment).
+      COCKROACH_USER: app_user
       COCKROACH_PASSWORD: ""
       COCKROACH_DATABASE: crdb_calisteniaapp_db
+      # Separate admin identity, used only by Alembic and one-off scripts
+      # (e.g. backend/scripts/seed_exercises.py) that need DDL/full-table
+      # privileges app_user deliberately doesn't have -- see app/config.py.
+      COCKROACH_ADMIN_USER: root
+      COCKROACH_ADMIN_PASSWORD: ""
     restart: unless-stopped
 
   frontend:

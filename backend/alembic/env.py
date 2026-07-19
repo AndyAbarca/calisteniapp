@@ -53,7 +53,13 @@ from app.config import settings  # noqa: E402
 from app.database import Base  # noqa: E402
 import app.models  # noqa: E402,F401 -- import registers all models on Base.metadata
 
-config.set_main_option("sqlalchemy.url", settings.database_url)
+# Migrations run as the admin identity (root), not settings.database_url's
+# app_user -- DDL (CREATE TABLE, ALTER TABLE, etc.) is exactly the set of
+# privileges app_user deliberately doesn't have. See the cockroach_admin_*
+# comment in app/config.py for the full reasoning, including why this is
+# privilege isolation rather than authentication (the cluster runs
+# --insecure, which doesn't enforce passwords at all).
+config.set_main_option("sqlalchemy.url", settings.admin_database_url)
 
 # Base.metadata only contains tables for modules that have actually been
 # imported by the time this runs -- the `import app.models` above is what

@@ -464,11 +464,18 @@ INSERT_SQL = """
 
 
 def main() -> None:
+    # Connects as the admin identity (root), not settings.cockroach_user
+    # (app_user) -- app_user only has SELECT/INSERT/UPDATE/DELETE by
+    # design (see app/config.py), and while a plain INSERT-only load like
+    # this one would technically fit within that, this script deliberately
+    # runs as root/admin for consistency with Alembic and so it isn't
+    # silently coupled to app_user's exact privilege set if it ever needs
+    # to do more than insert.
     conn = psycopg2.connect(
         host=settings.cockroach_host,
         port=settings.cockroach_port,
-        user=settings.cockroach_user,
-        password=settings.cockroach_password,
+        user=settings.cockroach_admin_user,
+        password=settings.cockroach_admin_password,
         dbname=settings.cockroach_database,
         sslmode="disable",
     )
