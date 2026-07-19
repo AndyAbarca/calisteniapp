@@ -33,48 +33,70 @@ calisthenics coach).
 - Version control: Git + GitHub
   - Remote repo: https://github.com/AndyAbarca/calisteniapp (public)
 
-## 4. Domain model (DRAFT — subject to revision)
+## 4. Domain model (IMPLEMENTED — schema migrated, `exercise` data still pending)
 
-> **IMPORTANT:** this model is a working draft. The user has an ebook with calisthenics
-> exercise tables (categories, progressions, difficulty levels) that hasn't been
-> incorporated into this document yet. **Do not build complex business logic on top
-> of the `exercise` entity until this section is confirmed or updated.**
-> It is safe to proceed with: infrastructure setup, authentication, base FastAPI
-> structure, CockroachDB connection — anything that doesn't depend on the fine-grained
-> detail of what fields an exercise has.
+> **IMPORTANT:** the schema below is implemented in `backend/app/models/` and applied
+> to CockroachDB via Alembic migrations (see section 7). What's still open is the
+> `exercise` entity's *data*: the user has an ebook with calisthenics exercise tables
+> (categories, progressions, difficulty levels) that hasn't been loaded yet, so no real
+> exercise rows exist beyond whatever was used for testing. **Do not build complex
+> business logic that assumes a populated `exercise` table until real data is loaded.**
+> The columns themselves are final enough to build against.
 
 ### Entities
 
-- **student** (alumno)
-  `id, name, date_of_birth, notes`
+- **student** (alumno) — `backend/app/models/student.py`
+  `id (UUID, PK), name, date_of_birth, notes`
   Represents the person training. Multi-user from day 1 (see section 1).
 
-- **exercise** (ejercicio) [PENDING REVIEW WITH EBOOK MATERIAL]
-  `id, name, category, metric_unit`
-  `metric_unit` indicates how performance is measured for that exercise: repetitions,
-  time (seconds), or repetitions + added weight.
-  Candidates to add once the ebook is reviewed: `difficulty_level`,
-  `progresses_from` (reference to another exercise, to model progression chains,
-  e.g. "knee push-ups → standard push-ups → one-arm push-ups").
+- **exercise** (ejercicio) — `backend/app/models/exercise.py` [SCHEMA DONE, DATA PENDING EBOOK LOAD]
+  `id (UUID, PK), name (unique), movement_pattern, progression_line, level, equipment,
+  progresses_from_id, book_page`
+  `movement_pattern` is a free-text field for now (e.g. Push/Pull/Legs/Core/Static, no
+  DB-level enum yet). `progression_line` + `level` together locate an exercise within a
+  named progression chain (e.g. "Pull-ups", "Front Lever"), with a unique constraint on
+  the pair. `progresses_from_id` self-references `exercise.id` to point at the prior
+  step in that chain (nullable — the first step of a line has no predecessor), e.g.
+  "knee push-ups → standard push-ups → one-arm push-ups". `book_page` links back to the
+  ebook page an exercise was sourced from, to ease loading and cross-checking that data.
 
-- **routine** (rutina)
-  `id, student_id, name, description, created_by` (values: `manual` | `auto`)
+- **routine** (rutina) — `backend/app/models/routine.py`
+  `id (UUID, PK), student_id, name, description, generation_method` (values: `manual` |
+  `auto`)
+  Named `generation_method` rather than the originally drafted `created_by`, to avoid
+  colliding with a future auth `created_by_user_id` field — see section 6.
 
-- **routine_exercise** (rutina_ejercicio) — bridge table routine↔exercise, with
-  relationship metadata
+- **routine_exercise** (rutina_ejercicio) — `backend/app/models/routine_exercise.py` —
+  bridge table routine↔exercise, with relationship metadata
   `routine_id, exercise_id, order, target_sets, target_reps`
+  Composite primary key `(routine_id, exercise_id)`, no separate `id` column — an
+  exercise appears at most once per routine, so the natural key already uniquely
+  identifies a row.
 
-- **session** (sesion)
-  `id, routine_id, student_id, date, notes, duration`
-  A concrete execution of a routine, on a given date.
+- **session** (sesion) — `backend/app/models/session.py`
+  `id (UUID, PK), routine_id, date, notes, duration`
+  A concrete execution of a routine, on a given date. `routine_id` is **nullable, with
+  `ON DELETE SET NULL`** — deliberately, to support ad-hoc sessions logged with no
+  planned routine, and so deleting an old routine never cascades into deleting the
+  historical session data that feeds the progress charts. **Open question, not yet
+  solved:** there is no direct `student_id` on this table. For a session tied to a
+  routine, the student is derivable via `routine_id -> routine.student_id`, but an
+  ad-hoc session with no routine currently has no link to any student at all — revisit
+  once ad-hoc sessions are actually used.
 
-- **session_set** (sesion_set)
-  `id, session_id, exercise_id, set_number, actual_reps, added_weight_kg, rpe,
-  time_seconds`
-  The most granular level of detail: a single set within a session.
-  This is the table that feeds the progress charts (e.g., "added-weight progression
-  on pull-ups over time" is a query grouped by `exercise_id`, ordered by the date of
-  the associated `session`).
+- **session_set** (sesion_set) — `backend/app/models/session_set.py`
+  `id (UUID, PK), session_id, exercise_id, set_number, set_order, actual_reps,
+  added_weight_kg, rpe, time_seconds`
+  The most granular level of detail: a single set within a session. This is the table
+  that feeds the progress charts (e.g., "added-weight progression on pull-ups over
+  time" is a query grouped by `exercise_id`, ordered by the date of the associated
+  `session`). Two distinct position columns: `set_number` is the position within *that
+  exercise* in the session (e.g. "3rd set of pull-ups today"); `set_order` is the
+  position within the *session as a whole*, across every exercise, which is what makes
+  it possible to reconstruct the actual chronological order of a circuit/superset
+  workout (`set_number` alone can't — two sets can share a `set_number` but happen at
+  different times). Unique constraints on both `(session_id, exercise_id, set_number)`
+  and `(session_id, set_order)`.
 
 ## 5. Roadmap (phases)
 
@@ -111,6 +133,17 @@ calisthenics coach).
   decision before accepting it. When ambiguity arises on an architecturally
   relevant decision (library choice, design pattern, etc.), briefly explain the
   trade-off instead of silently applying a default.
+- **UUID primary keys, not serial/int**: every domain table (section 4) uses a
+  UUID primary key instead of an auto-incrementing integer. Sequential integer PKs
+  cause write hotspotting in CockroachDB, since consecutive inserts land on the same
+  key range and therefore the same range leaseholder/node — UUIDs spread writes
+  across the keyspace instead.
+- **UUID PKs need a `server_default`, not just an ORM-side default**: not every
+  insert goes through the SQLAlchemy ORM — e.g. bulk-loading the ebook's exercise
+  data is expected to happen via raw SQL — so PK generation has to work at the
+  database level too, not just in Python. Every UUID PK column therefore has
+  `server_default=text("gen_random_uuid()")` in addition to the ORM-side
+  `default=uuid.uuid4`.
 
 ## 7. Current environment state (as of this document's creation)
 
@@ -128,12 +161,20 @@ calisthenics coach).
   `0.0.0.0` for LAN access. Verified via `docker compose up --build`. The `models/`,
   `schemas/`, and `routes/` packages exist but are intentionally empty, pending the
   domain model (see section 4).
+- Alembic has 2 migrations applied against CockroachDB: the domain model baseline
+  (`7ebeb2df8200`, creates the 6 tables from section 4) and a follow-up fix adding
+  server-side UUID defaults (`b9f6688550b9`). `alembic/env.py` now has
+  `compare_server_default=True` enabled so autogenerate reliably detects
+  `server_default` changes going forward — this wasn't the case initially, which
+  caused a silently empty migration the first time a `server_default` was added.
 
 ## 8. Explicit pending items (nothing left implicitly "done")
 
 - [x] Decide public vs. private for the GitHub repo. -> Public
 - [x] Create the remote repo and connect it (`git remote add origin ...`).
 - [x] Scaffold the infra (backend/frontend/docker-compose) and commit it.
+- [x] Implement the 6 domain models (student, exercise, routine, routine_exercise,
+  session, session_set) with their Alembic migrations.
 - [ ] Review and update the `exercise` model with the ebook material.
 - [ ] Define the final folder structure for the scaffold (backend/frontend/infra).
 - [ ] Decide user authentication strategy (even if single-user initially).
