@@ -154,7 +154,7 @@ calisthenics coach).
 - **DB access is split into two identities, not one shared `root`**: `app_user`
   is least-privilege (`SELECT`/`INSERT`/`UPDATE`/`DELETE` only, no DDL) and is
   what the backend's runtime connection actually uses (`database_url` in
-  `app/config.py`); `root` is used only by Alembic (`alembic/env.py`) and
+  `app/config.py`); `root` is used only by Alembic (`backend/alembic/env.py`) and
   one-off scripts that need DDL (`admin_database_url`), e.g.
   `seed_exercises.py`. Neither user has a password — CockroachDB's `--insecure`
   mode doesn't just skip checking passwords, it refuses to let a user have one
@@ -189,12 +189,12 @@ calisthenics coach).
   `0.0.0.0` for LAN access. Verified via `docker compose up --build`. The `models/`,
   `schemas/`, and `routes/` packages exist but are intentionally empty, pending the
   domain model (see section 4).
-- Alembic has 3 migrations applied against CockroachDB: the domain model baseline
-  (`7ebeb2df8200`, creates the 6 tables from section 4), a follow-up fix adding
-  server-side UUID defaults (`b9f6688550b9`), and `df3166695497` (adds
-  `exercise.level_variant`, makes `exercise.level` nullable, and widens the unique
-  constraint to `(progression_line, level, level_variant)`). `alembic/env.py` now has
-  `compare_server_default=True` enabled so autogenerate reliably detects
+- Alembic has 3 migrations applied against CockroachDB, in `backend/alembic/versions/`:
+  the domain model baseline (`7ebeb2df8200`, creates the 6 tables from section 4), a
+  follow-up fix adding server-side UUID defaults (`b9f6688550b9`), and `df3166695497`
+  (adds `exercise.level_variant`, makes `exercise.level` nullable, and widens the
+  unique constraint to `(progression_line, level, level_variant)`). `backend/alembic/env.py`
+  now has `compare_server_default=True` enabled so autogenerate reliably detects
   `server_default` changes going forward — this wasn't the case initially, which
   caused a silently empty migration the first time a `server_default` was added.
 - `backend/scripts/seed_exercises.py` loaded 222 real `exercise` rows, derived from

@@ -1,7 +1,7 @@
 """
 Seed script for the `exercise` table, derived from the exercise index of
 Steven Low's "Overcoming Gravity" 2nd Edition (chapters 24-27), per the
-raw index text in ../../prompt_seed_exercises.md.
+raw index text in prompt_seed_exercises.md.
 
 Inserts via raw SQL (psycopg2), not the SQLAlchemy ORM -- this is the
 deliberate test case for the server_default=gen_random_uuid() added to
