@@ -43,18 +43,51 @@ echo "Backup complete."
 echo "  Container path: /cockroach/cockroach-data/extern/backups/${TIMESTAMP}"
 echo "  Host path:      /data/calisteniapp-backups/${TIMESTAMP}"
 
+# The BACKUP directory above is root:root 750 inside the container (root
+# runs CockroachDB), which blocks non-root host users like andy_dell from
+# reading/copying it directly -- confirmed via a real `scp` "Permission
+# denied". Tar it into a single file and loosen just that file's
+# permissions, all still inside the container (root's the only identity
+# that can touch these files) -- no sudo needed on the host. The original
+# directory is left untouched (still root:root) since RESTORE only ever
+# needs it read by the CockroachDB process itself, not by a host user.
+echo "Compressing backup for host-side access ..."
+
+docker compose exec -T cockroachdb tar -czf \
+  "/cockroach/cockroach-data/extern/backups/${TIMESTAMP}.tar.gz" \
+  -C /cockroach/cockroach-data/extern/backups "${TIMESTAMP}"
+
+docker compose exec -T cockroachdb chmod 644 \
+  "/cockroach/cockroach-data/extern/backups/${TIMESTAMP}.tar.gz"
+
+echo "Compressed archive (host-readable):"
+echo "  Host path: /data/calisteniapp-backups/${TIMESTAMP}.tar.gz"
+
 # --- Restoring from a backup -------------------------------------------
 #
 # Each run of this script creates its own backup collection at
 # nodelocal://1/backups/<timestamp> (one BACKUP per collection), so
 # restoring means pointing RESTORE at the specific timestamp you want.
+# Either the original nodelocal directory or the .tar.gz can be used,
+# whichever is available -- they contain the same backup.
 #
 # 1. Find the timestamp of the backup you want -- list them directly on
 #    the host, since /data/calisteniapp-backups is the bind-mounted view
 #    of the same directory:
 #      ls /data/calisteniapp-backups/
 #
-# 2. (Optional) Inspect what's inside a given backup before restoring:
+# 2a. If the original uncompressed directory
+#     (/data/calisteniapp-backups/<timestamp>/) is still present, skip
+#     straight to step 3.
+#
+# 2b. If only the .tar.gz is available (e.g. it's the only thing you
+#     copied off this machine, or the original directory was cleaned up),
+#     extract it back into place first:
+#       docker compose exec -T cockroachdb tar -xzf \
+#         /cockroach/cockroach-data/extern/backups/<timestamp>.tar.gz \
+#         -C /cockroach/cockroach-data/extern/backups
+#
+# 2c. (Optional) Inspect what's inside a given backup before restoring:
 #      docker compose exec cockroachdb cockroach sql --insecure -e \
 #        "SHOW BACKUPS IN 'nodelocal://1/backups/<timestamp>';"
 #
