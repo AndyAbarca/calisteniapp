@@ -11,6 +11,19 @@ services:
       - "0.0.0.0:8080:8080"
     volumes:
       - cockroach-data:/cockroach/cockroach-data
+      # Backup target for `BACKUP ... INTO 'nodelocal://1/backups/...'`
+      # (see backend/scripts/backup_db.sh). `nodelocal://1/<path>` resolves
+      # to <data-dir>/extern/<path> on node 1, so this bind-mounts that
+      # `extern/backups` subdirectory to a path on the SECOND disk (140GB,
+      # mounted at /data -- see CLAUDE.md's disk-mount notes), deliberately
+      # separate from both the OS disk (100GB) and the `cockroach-data`
+      # named volume that holds the live DB files. This is a single-node
+      # dev cluster with no HA, so the actual failure this protects
+      # against is losing the host machine (which already happened once)
+      # -- not a substitute for a real multi-node/offsite backup strategy.
+      # An OS-disk failure alone won't take the backups down with it,
+      # since they live on a physically/virtually separate disk.
+      - /data/calisteniapp-backups:/cockroach/cockroach-data/extern/backups
     healthcheck:
       # CockroachDB's single-node image doesn't accept a --database flag
       # at startup like some DB images do, so the database is created via
