@@ -208,6 +208,32 @@ calisthenics coach).
   fresh volume (`docker compose down -v` → `up` → `alembic upgrade head` →
   `seed_exercises.py`), including confirming `app_user` can `SELECT` but
   cannot `CREATE TABLE`.
+- The previous Linux Mint machine running this project's infra **died**.
+  Infra was rebuilt on a Hyper-V VM with two virtual disks: a 100GB OS
+  disk (`sda`) and a 140GB data disk (`sdb`, mounted at `/data`). Since
+  the DB came up empty on rebuild, `db-init`, `alembic upgrade head`, and
+  `backend/scripts/seed_exercises.py` were all re-run successfully,
+  restoring the full schema and all 222 `exercise` rows — incidentally
+  confirming the whole stack really is reproducible from just the repo
+  plus the ebook seed data.
+- Following that incident, a real backup strategy: `backend/scripts/backup_db.sh`
+  runs CockroachDB's native `BACKUP DATABASE ... INTO
+  'nodelocal://1/backups/<timestamp>'`, then tars and `chmod 644`s the
+  result into a world-readable `.tar.gz` (the raw backup directory is
+  `root:root` inside the container, since CockroachDB runs as root
+  there, and would otherwise be unreadable by the host's `andy_dell`
+  user). `docker-compose.yml` bind-mounts `/data/calisteniapp-backups`
+  — the separate 140GB data disk, not the 100GB OS disk — into the
+  `cockroachdb` container's `extern/backups` directory, so an OS-disk
+  failure doesn't take the backups down with it. Tested end-to-end
+  (backup → restore into a temporary database) more than once. A cron
+  job on the Mint VM runs `backup_db.sh` daily at 2 AM. A second,
+  off-VM copy also exists: a scheduled job on the Windows physical host
+  pulls the latest `.tar.gz` down daily over SSH, via a dedicated
+  passphrase-less key kept separate from Andy's personal key — not
+  detailed further here since those scripts/paths live outside this
+  repo — so backups now exist in 2 places on 2 different machines, not
+  just on the VM that could die again.
 
 ## 8. Explicit pending items (nothing left implicitly "done")
 
