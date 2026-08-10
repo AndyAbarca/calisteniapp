@@ -32,6 +32,21 @@ calisthenics coach).
 - Project path on the Mint filesystem: `/home/andy_dell/DevOps/calisteniapp`
 - Version control: Git + GitHub
   - Remote repo: https://github.com/AndyAbarca/calisteniapp (public)
+- **Networking fix (static IP for Remote-SSH)**: the Mint VM originally had a
+  DHCP-assigned IP that changed periodically, breaking VS Code Remote-SSH's
+  hostname-based connection. Fixed by:
+  - Setting a static IP (`192.168.1.65`) on the VM via `nmcli`
+    (`ipv4.method manual`), since there's no admin access to the router to do
+    a DHCP reservation instead.
+  - Adding an entry to the Windows host's hosts file
+    (`C:\Windows\System32\drivers\etc\hosts`) mapping `192.168.1.65` to
+    `andy-dell`, plus an SSH config entry (`~/.ssh/config` on Windows) for the
+    `Host andy-dell` alias — since Windows doesn't resolve mDNS/`.local`
+    hostnames without extra software.
+  - **Not reproducible from the repo**: if the VM is ever rebuilt again (as
+    already happened once — see section 7), this static IP configuration
+    needs to be redone manually. It's VM/host-level networking, not part of
+    the docker-compose/repo setup.
 
 ## 4. Domain model (IMPLEMENTED — schema migrated, `exercise` seeded with real data)
 
